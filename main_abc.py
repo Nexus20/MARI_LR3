@@ -11,9 +11,11 @@ from abc_experiments import (
     print_results,
     print_comparison_table,
     analyze_results,
-    experiment_coefficient_c
+    experiment_coefficient_c,
+    select_best_config
 )
 from abc_visualization import plot_convergence, plot_comparison
+from visualize_trajectory import visualize_both
 
 
 # --- Griewank function ---
@@ -106,9 +108,13 @@ if __name__ == "__main__":
     print_comparison_table(summaries_c, "Коефіцієнт c")
     analyze_results(summaries_c, "Коефіцієнт c")
     
-    # Графік порівняння для різних c
+    # Графік порівняння для різних c (з додаванням Classic ABC)
+    histories_with_classic = {
+        "Classic ABC": experiments["histories"],
+        **histories_c
+    }
     plot_comparison(
-        histories_c,
+        histories_with_classic,
         title="Modified ABC: Effect of coefficient 'c' on convergence"
     )
     
@@ -117,13 +123,13 @@ if __name__ == "__main__":
     print("ФІНАЛЬНЕ ПОРІВНЯННЯ: КЛАСИЧНИЙ VS МОДИФІКОВАНИЙ ABC")
     print("="*80)
     
-    # Знаходимо найкраще значення c
-    best_c_config = min(summaries_c.items(), 
-                       key=lambda x: x[1]["statistics"]["mean"])
-    best_c = float(best_c_config[0].split('=')[1])
+    # Знаходимо найкраще значення c з багатокритеріальним підходом
+    best_c_name, best_c_data, selection_reason = select_best_config(summaries_c)
+    best_c = float(best_c_name.split('=')[1])
     
     print(f"\nНайкращий коефіцієнт c = {best_c}")
-    print(f"Mean: {best_c_config[1]['statistics']['mean']:.6e}")
+    print(f"Критерій вибору: {selection_reason}")
+    print(f"Mean: {best_c_data['statistics']['mean']:.6e}")
     
     # Запускаємо модифікований ABC з найкращим c
     print(f"\n--- МОДИФІКОВАНИЙ ABC (c={best_c}) ---")
@@ -169,15 +175,25 @@ if __name__ == "__main__":
     modified_std = exp_modified["statistics"]["std"]
     
     print("\n1. ШВИДКІСТЬ ЗБІЖНОСТІ:")
-    if modified_mean < classic_mean:
-        improvement = ((classic_mean - modified_mean) / classic_mean) * 100
-        print(f"   ✓ Модифікований ABC показує кращий результат на {improvement:.2f}%")
+    if abs(modified_mean - classic_mean) < 1e-15:
+        print(f"   ≈ Обидва методи показують однакові результати (обидва досягли глобального мінімуму)")
+    elif modified_mean < classic_mean:
+        if classic_mean > 0:
+            improvement = ((classic_mean - modified_mean) / classic_mean) * 100
+            print(f"   ✓ Модифікований ABC показує кращий результат на {improvement:.2f}%")
+        else:
+            print(f"   ✓ Модифікований ABC показує кращий результат ({modified_mean:.6e} vs {classic_mean:.6e})")
     else:
-        degradation = ((modified_mean - classic_mean) / classic_mean) * 100
-        print(f"   ✗ Класичний ABC показує кращий результат на {degradation:.2f}%")
+        if classic_mean > 0:
+            degradation = ((modified_mean - classic_mean) / classic_mean) * 100
+            print(f"   ✗ Класичний ABC показує кращий результат на {degradation:.2f}%")
+        else:
+            print(f"   ✗ Класичний ABC показує кращий результат ({classic_mean:.6e} vs {modified_mean:.6e})")
     
     print("\n2. СТАБІЛЬНІСТЬ РОЗВ'ЯЗКУ:")
-    if modified_std < classic_std:
+    if abs(modified_std - classic_std) < 1e-15:
+        print(f"   ≈ Обидва методи показують однакову стабільність (std ≈ 0)")
+    elif modified_std < classic_std:
         print(f"   ✓ Модифікований ABC більш стабільний (std: {modified_std:.6e} vs {classic_std:.6e})")
     else:
         print(f"   ✗ Класичний ABC більш стабільний (std: {classic_std:.6e} vs {modified_std:.6e})")
@@ -186,7 +202,9 @@ if __name__ == "__main__":
     classic_max = experiments["statistics"]["max"]
     modified_max = exp_modified["statistics"]["max"]
     
-    if modified_max < classic_max:
+    if abs(modified_max - classic_max) < 1e-15:
+        print(f"   ≈ Обидва методи мають однаковий ризик (обидва знайшли глобальний мінімум у всіх прогонах)")
+    elif modified_max < classic_max:
         print(f"   ✓ Модифікований ABC має менший ризик застрягання")
         print(f"     (worst case: {modified_max:.6e} vs {classic_max:.6e})")
     else:
@@ -200,4 +218,22 @@ if __name__ == "__main__":
     print("✓ Протестовано різні значення коефіцієнта c (0.1-0.5)")
     print("✓ Проведено порівняльний аналіз класичного та модифікованого ABC")
     print("✓ Проаналізовано швидкість збіжності, стабільність та ризик локальних мінімумів")
+
+    # =========================================================================
+    # РІВЕНЬ 'ВІДМІННО A': ВІЗУАЛІЗАЦІЯ ПОВЕРХНІ З ТРАЄКТОРІЄЮ
+    # =========================================================================
+    
+    print("\n" + "="*80)
+    print("ДОДАТКОВА ВІЗУАЛІЗАЦІЯ: ПОВЕРХНЯ ФУНКЦІЇ З ТРАЄКТОРІЄЮ")
+    print("="*80)
+    print("Запускаємо окремий модуль візуалізації...")
+    
+    # Викликаємо модуль для візуалізації обох варіантів
+    visualize_both(bounds=bounds, cfg=cfg, c=0.2, save_every=10)
+    
+    print("\n" + "="*80)
+    print("УСІХ РІВНІВ ЗАВЕРШЕНО!")
+    print("="*80)
+    print("\nПРИМІТКА: Для окремого запуску візуалізації використовуйте:")
+    print("  python visualize_trajectory.py")
 

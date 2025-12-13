@@ -161,6 +161,86 @@ def analyze_results(summaries: Dict, parameter_name: str):
     print("-" * 80)
 
 
+def calculate_cycles_to_threshold(history: List[float], threshold: float = 1e-10) -> int:
+    """
+    Підраховує кількість циклів, потрібних для досягнення порогового значення
+    
+    Параметри:
+    - history: список значень функції на кожній ітерації
+    - threshold: порогове значення
+    
+    Повертає:
+    - кількість циклів до досягнення порогу (або len(history), якщо не досягнуто)
+    """
+    for i, value in enumerate(history):
+        if value < threshold:
+            return i
+    return len(history)
+
+
+def select_best_config(summaries: Dict, threshold: float = 1e-10) -> tuple:
+    """
+    Вибирає найкращу конфігурацію за багатокритеріальним підходом:
+    1. Якщо різниця в mean < 1e-15 (всі досягли глобального мінімуму),
+       то порівнюємо за швидкістю збіжності
+    2. Якщо швидкість однакова, порівнюємо за стабільністю (std)
+    3. Інакше використовуємо mean
+    
+    Параметри:
+    - summaries: dict {config_name: experiment_results}
+    - threshold: поріг для визначення досягнення мінімуму
+    
+    Повертає:
+    - (config_name, experiment_results, selection_reason)
+    """
+    # Перевіряємо, чи всі mean значення практично однакові (близькі до 0)
+    means = {k: v["statistics"]["mean"] for k, v in summaries.items()}
+    mean_values = list(means.values())
+    
+    # Якщо всі mean дуже малі та приблизно рівні
+    if all(m < 1e-10 for m in mean_values) and (max(mean_values) - min(mean_values)) < 1e-15:
+        print("\nВСІ КОНФІГУРАЦІЇ ДОСЯГЛИ ГЛОБАЛЬНОГО МІНІМУМУ!")
+        print("Вибір за швидкістю збіжності (кількість циклів до порогу на усередненій кривій)...")
+        
+        # Підраховуємо цикли до порогу на УСЕРЕДНЕНІЙ кривій для кожної конфігурації
+        cycles_to_threshold = {}
+        for config_name, exp_data in summaries.items():
+            # Обчислюємо усереднену криву збіжності
+            histories = exp_data["histories"]
+            max_len = max(len(h) for h in histories)
+            H = np.array([h + [h[-1]]*(max_len-len(h)) for h in histories])
+            mean_curve = H.mean(axis=0)
+            
+            # Рахуємо цикли до порогу на усередненій кривій
+            cycles = calculate_cycles_to_threshold(mean_curve.tolist(), threshold)
+            cycles_to_threshold[config_name] = cycles
+            print(f"  {config_name}: {cycles} циклів до порогу 1e-10")
+        
+        # Вибираємо конфігурацію з найменшою кількістю циклів
+        best_config_name = min(cycles_to_threshold.items(), key=lambda x: x[1])[0]
+        
+        # Перевіряємо, чи є інші з такою ж швидкістю
+        best_cycles = cycles_to_threshold[best_config_name]
+        tied_configs = [k for k, v in cycles_to_threshold.items() if abs(v - best_cycles) < 5]
+        
+        if len(tied_configs) > 1:
+            print(f"\nКонфігурації {tied_configs} мають близьку швидкість збіжності.")
+            print("Вибір за стабільністю (std)...")
+            best_config_name = min(tied_configs, 
+                                  key=lambda k: summaries[k]["statistics"]["std"])
+            reason = f"convergence_speed={best_cycles} cycles (tied, selected by stability)"
+        else:
+            reason = f"convergence_speed={best_cycles} cycles"
+        
+        return (best_config_name, summaries[best_config_name], reason)
+    
+    else:
+        # Стандартний вибір за найменшим mean
+        best_config_name = min(summaries.items(), 
+                              key=lambda x: x[1]["statistics"]["mean"])[0]
+        return (best_config_name, summaries[best_config_name], "best_mean")
+
+
 def experiment_coefficient_c(f: Callable[[np.ndarray], float],
                              bounds: np.ndarray,
                              cfg: ABCConfig,

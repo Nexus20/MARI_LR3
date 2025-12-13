@@ -338,3 +338,140 @@ def abc_modified(f: Callable[[np.ndarray], float],
         'evaluations': evaluations
     }
 
+
+def abc_with_trajectory(f: Callable[[np.ndarray], float], 
+                        bounds: np.ndarray,
+                        cfg: ABCConfig,
+                        save_every: int = 10,
+                        use_modified: bool = False,
+                        c: float = 0.3) -> Dict:
+    """
+    ABC з збереженням траєкторії найкращого розв'язку для візуалізації
+    
+    Параметри:
+    - f: цільова функція
+    - bounds: межі області
+    - cfg: конфігурація
+    - save_every: зберігати позицію кожні N циклів
+    - use_modified: використовувати модифікований ABC
+    - c: коефіцієнт для модифікованого ABC
+    
+    Повертає:
+    - dict з результатами + trajectory (список позицій)
+    """
+    if use_modified:
+        result = abc_modified(f, bounds, cfg, c=c)
+    else:
+        result = abc_classic(f, bounds, cfg)
+    
+    # Запускаємо ще раз з трекінгом
+    np.random.seed(cfg.seed)
+    d = len(bounds)
+    
+    food_sources = np.random.uniform(
+        low=bounds[:, 0],
+        high=bounds[:, 1],
+        size=(cfg.colony_size, d)
+    )
+    
+    f_values = np.array([f(x) for x in food_sources])
+    fitness = np.array([calculate_fitness(fv) for fv in f_values])
+    trials = np.zeros(cfg.colony_size, dtype=int)
+    
+    best_idx = np.argmin(f_values)
+    best_solution = food_sources[best_idx].copy()
+    best_f_value = f_values[best_idx]
+    
+    # Збереження траєкторії
+    trajectory = [best_solution.copy()]
+    
+    for cycle in range(cfg.max_cycles):
+        # EMPLOYED BEES
+        for i in range(cfg.colony_size):
+            j = np.random.randint(d)
+            k = i
+            while k == i:
+                k = np.random.randint(cfg.colony_size)
+            
+            phi = np.random.uniform(-1, 1)
+            candidate = food_sources[i].copy()
+            
+            if use_modified and d == 2:  # модифікація тільки для 2D
+                r = np.random.uniform(0, 1, d)
+                candidate = food_sources[i] + phi * (food_sources[i] - food_sources[k]) - c * r * (food_sources[i] - best_solution)
+            else:
+                candidate[j] = food_sources[i, j] + phi * (food_sources[i, j] - food_sources[k, j])
+            
+            candidate = np.clip(candidate, bounds[:, 0], bounds[:, 1])
+            candidate_f_value = f(candidate)
+            candidate_fitness = calculate_fitness(candidate_f_value)
+            
+            if candidate_fitness > fitness[i]:
+                food_sources[i] = candidate
+                f_values[i] = candidate_f_value
+                fitness[i] = candidate_fitness
+                trials[i] = 0
+            else:
+                trials[i] += 1
+        
+        # ONLOOKER BEES
+        probabilities = fitness / np.sum(fitness)
+        onlooker_count = 0
+        i = 0
+        
+        while onlooker_count < cfg.colony_size:
+            if np.random.rand() < probabilities[i]:
+                j = np.random.randint(d)
+                k = i
+                while k == i:
+                    k = np.random.randint(cfg.colony_size)
+                
+                phi = np.random.uniform(-1, 1)
+                candidate = food_sources[i].copy()
+                
+                if use_modified and d == 2:
+                    r = np.random.uniform(0, 1, d)
+                    candidate = food_sources[i] + phi * (food_sources[i] - food_sources[k]) - c * r * (food_sources[i] - best_solution)
+                else:
+                    candidate[j] = food_sources[i, j] + phi * (food_sources[i, j] - food_sources[k, j])
+                
+                candidate = np.clip(candidate, bounds[:, 0], bounds[:, 1])
+                candidate_f_value = f(candidate)
+                candidate_fitness = calculate_fitness(candidate_f_value)
+                
+                if candidate_fitness > fitness[i]:
+                    food_sources[i] = candidate
+                    f_values[i] = candidate_f_value
+                    fitness[i] = candidate_fitness
+                    trials[i] = 0
+                else:
+                    trials[i] += 1
+                
+                onlooker_count += 1
+            
+            i = (i + 1) % cfg.colony_size
+        
+        # SCOUT BEES
+        for i in range(cfg.colony_size):
+            if trials[i] >= cfg.limit:
+                food_sources[i] = np.random.uniform(
+                    low=bounds[:, 0],
+                    high=bounds[:, 1],
+                    size=d
+                )
+                f_values[i] = f(food_sources[i])
+                fitness[i] = calculate_fitness(f_values[i])
+                trials[i] = 0
+        
+        # Оновлення найкращого
+        current_best_idx = np.argmin(f_values)
+        if f_values[current_best_idx] < best_f_value:
+            best_f_value = f_values[current_best_idx]
+            best_solution = food_sources[current_best_idx].copy()
+        
+        # Зберігаємо траєкторію
+        if cycle % save_every == 0 or cycle == cfg.max_cycles - 1:
+            trajectory.append(best_solution.copy())
+    
+    result['trajectory'] = trajectory
+    return result
