@@ -359,12 +359,6 @@ def abc_with_trajectory(f: Callable[[np.ndarray], float],
     Повертає:
     - dict з результатами + trajectory (список позицій)
     """
-    if use_modified:
-        result = abc_modified(f, bounds, cfg, c=c)
-    else:
-        result = abc_classic(f, bounds, cfg)
-    
-    # Запускаємо ще раз з трекінгом
     np.random.seed(cfg.seed)
     d = len(bounds)
     
@@ -381,6 +375,10 @@ def abc_with_trajectory(f: Callable[[np.ndarray], float],
     best_idx = np.argmin(f_values)
     best_solution = food_sources[best_idx].copy()
     best_f_value = f_values[best_idx]
+
+    # Історія збіжності (best-so-far по циклах)
+    history = [best_f_value]
+    evaluations = cfg.colony_size
     
     # Збереження траєкторії
     trajectory = [best_solution.copy()]
@@ -395,16 +393,20 @@ def abc_with_trajectory(f: Callable[[np.ndarray], float],
             
             phi = np.random.uniform(-1, 1)
             candidate = food_sources[i].copy()
-            
-            if use_modified and d == 2:  # модифікація тільки для 2D
-                r = np.random.uniform(0, 1, d)
-                candidate = food_sources[i] + phi * (food_sources[i] - food_sources[k]) - c * r * (food_sources[i] - best_solution)
+
+            if use_modified:
+                # Узгоджено з abc_modified(): змінюємо ТІЛЬКИ одну координату j
+                r = np.random.uniform(0, 1)
+                candidate[j] = (food_sources[i, j] +
+                               phi * (food_sources[i, j] - food_sources[k, j]) -
+                               c * r * (food_sources[i, j] - best_solution[j]))
             else:
                 candidate[j] = food_sources[i, j] + phi * (food_sources[i, j] - food_sources[k, j])
             
             candidate = np.clip(candidate, bounds[:, 0], bounds[:, 1])
             candidate_f_value = f(candidate)
             candidate_fitness = calculate_fitness(candidate_f_value)
+            evaluations += 1
             
             if candidate_fitness > fitness[i]:
                 food_sources[i] = candidate
@@ -429,15 +431,18 @@ def abc_with_trajectory(f: Callable[[np.ndarray], float],
                 phi = np.random.uniform(-1, 1)
                 candidate = food_sources[i].copy()
                 
-                if use_modified and d == 2:
-                    r = np.random.uniform(0, 1, d)
-                    candidate = food_sources[i] + phi * (food_sources[i] - food_sources[k]) - c * r * (food_sources[i] - best_solution)
+                if use_modified:
+                    r = np.random.uniform(0, 1)
+                    candidate[j] = (food_sources[i, j] +
+                                   phi * (food_sources[i, j] - food_sources[k, j]) -
+                                   c * r * (food_sources[i, j] - best_solution[j]))
                 else:
                     candidate[j] = food_sources[i, j] + phi * (food_sources[i, j] - food_sources[k, j])
                 
                 candidate = np.clip(candidate, bounds[:, 0], bounds[:, 1])
                 candidate_f_value = f(candidate)
                 candidate_fitness = calculate_fitness(candidate_f_value)
+                evaluations += 1
                 
                 if candidate_fitness > fitness[i]:
                     food_sources[i] = candidate
@@ -461,6 +466,7 @@ def abc_with_trajectory(f: Callable[[np.ndarray], float],
                 )
                 f_values[i] = f(food_sources[i])
                 fitness[i] = calculate_fitness(f_values[i])
+                evaluations += 1
                 trials[i] = 0
         
         # Оновлення найкращого
@@ -468,10 +474,17 @@ def abc_with_trajectory(f: Callable[[np.ndarray], float],
         if f_values[current_best_idx] < best_f_value:
             best_f_value = f_values[current_best_idx]
             best_solution = food_sources[current_best_idx].copy()
+
+        history.append(best_f_value)
         
         # Зберігаємо траєкторію
         if cycle % save_every == 0 or cycle == cfg.max_cycles - 1:
             trajectory.append(best_solution.copy())
     
-    result['trajectory'] = trajectory
-    return result
+    return {
+        'best_solution': best_solution,
+        'best_fitness': best_f_value,
+        'history': history,
+        'evaluations': evaluations,
+        'trajectory': trajectory
+    }
