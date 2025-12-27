@@ -253,11 +253,11 @@ if __name__ == "__main__":
     save_gif_input = input("Зберегти як GIF? (y/n, default=n): ").strip().lower()
     save_gif = save_gif_input == 'y'
     
-    interval_input = input("Інтервал між кадрами в мс (default=100): ").strip()
-    interval = int(interval_input) if interval_input else 100
+    interval_input = input("Інтервал між кадрами в мс (default=200): ").strip()
+    interval = int(interval_input) if interval_input else 200
     
     save_every_input = input("Зберігати кожні N циклів (default=20): ").strip()
-    save_every = int(save_every_input) if save_every_input else 5
+    save_every = int(save_every_input) if save_every_input else 20
     
     if choice == "1":
         animate_classic_abc(bounds, cfg, save_every, interval, save_gif)
